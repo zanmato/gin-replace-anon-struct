@@ -1,0 +1,3 @@
+.mcp.json
+*.md
+gin-replace-anon-struct
