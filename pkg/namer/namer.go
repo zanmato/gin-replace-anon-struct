@@ -2,11 +2,10 @@ package namer
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"unicode"
 
-	"github.com/andreas/gin-replace-anon-struct/pkg/analyzer"
+	"gin-replace-anon-struct/pkg/analyzer"
 )
 
 // TypeNameGenerator generates appropriate type names for anonymous structs
@@ -30,13 +29,13 @@ func (g *TypeNameGenerator) GenerateTypeName(
 	existingTypes []string,
 ) string {
 	// Clean up handler name (remove package prefix if present)
-	handlerName = g.CleanHandlerName(handlerName)
+	handlerName = g.cleanHandlerName(handlerName)
 
 	// Generate base name based on binding type and context
-	baseName := g.GenerateBaseName(handlerName, variableName, bindingType)
+	baseName := g.generateBaseName(handlerName, variableName, bindingType)
 
 	// Make sure it's a valid Go type name (first letter uppercase)
-	typeName := g.MakeValidTypeName(baseName)
+	typeName := g.makeValidTypeName(baseName)
 
 	// Handle conflicts by adding suffixes
 	finalName := g.resolveConflict(typeName, existingTypes)
@@ -47,8 +46,8 @@ func (g *TypeNameGenerator) GenerateTypeName(
 	return finalName
 }
 
-// CleanHandlerName removes package prefixes and cleans up the handler name
-func (g *TypeNameGenerator) CleanHandlerName(handlerName string) string {
+// cleanHandlerName removes package prefixes and cleans up the handler name
+func (g *TypeNameGenerator) cleanHandlerName(handlerName string) string {
 	// Remove package prefix if present
 	if dotIndex := strings.LastIndex(handlerName, "."); dotIndex != -1 {
 		handlerName = handlerName[dotIndex+1:]
@@ -62,8 +61,8 @@ func (g *TypeNameGenerator) CleanHandlerName(handlerName string) string {
 	return handlerName
 }
 
-// GenerateBaseName generates the base type name based on context
-func (g *TypeNameGenerator) GenerateBaseName(handlerName, variableName string, bindingType analyzer.BindingType) string {
+// generateBaseName generates the base type name based on context
+func (g *TypeNameGenerator) generateBaseName(handlerName, variableName string, bindingType analyzer.BindingType) string {
 	// Variable name heuristics
 	if g.isQueryParamVarName(variableName) {
 		// Common query param variable names
@@ -138,8 +137,8 @@ func (g *TypeNameGenerator) isRequestBodyVarName(name string) bool {
 	return commonRequestBodyNames[strings.ToLower(name)]
 }
 
-// MakeValidTypeName ensures the name is a valid Go type name
-func (g *TypeNameGenerator) MakeValidTypeName(name string) string {
+// makeValidTypeName ensures the name is a valid Go type name
+func (g *TypeNameGenerator) makeValidTypeName(name string) string {
 	if name == "" {
 		return "AnonymousStruct"
 	}
@@ -180,98 +179,21 @@ func (g *TypeNameGenerator) capitalize(s string) string {
 func (g *TypeNameGenerator) toCamelCase(name string) string {
 	// Handle common suffixes by converting them to proper format
 	if strings.HasSuffix(name, "QueryParams") {
-		base := strings.TrimSuffix(name, "QueryParams")
-		return g.CapitalizeEachWord(base) + "QueryParams"
+		return strings.TrimSuffix(name, "QueryParams") + "QueryParams"
 	} else if strings.HasSuffix(name, "Request") {
-		base := strings.TrimSuffix(name, "Request")
-		return g.CapitalizeEachWord(base) + "Request"
+		return strings.TrimSuffix(name, "Request") + "Request"
 	} else if strings.HasSuffix(name, "Response") {
-		base := strings.TrimSuffix(name, "Response")
-		return g.CapitalizeEachWord(base) + "Response"
+		return strings.TrimSuffix(name, "Response") + "Response"
 	} else if strings.HasSuffix(name, "FormData") {
-		base := strings.TrimSuffix(name, "FormData")
-		return g.CapitalizeEachWord(base) + "FormData"
+		return strings.TrimSuffix(name, "FormData") + "FormData"
 	} else if strings.HasSuffix(name, "BindingData") {
-		base := strings.TrimSuffix(name, "BindingData")
-		return g.CapitalizeEachWord(base) + "BindingData"
+		return strings.TrimSuffix(name, "BindingData") + "BindingData"
 	} else if strings.HasSuffix(name, "Data") {
-		base := strings.TrimSuffix(name, "Data")
-		return g.CapitalizeEachWord(base) + "Data"
+		return strings.TrimSuffix(name, "Data") + "Data"
 	}
 
-	// For other cases, just capitalize each word
-	return g.CapitalizeEachWord(name)
-}
-
-// CapitalizeEachWord capitalizes the first letter of each word in a camelCase/PascalCase string
-func (g *TypeNameGenerator) CapitalizeEachWord(s string) string {
-	if s == "" {
-		return s
-	}
-
-	// For names that might already be in mixed case, ensure each word starts with uppercase
-	// This handles cases like "todoIndex" -> "TodoIndex" or "todoIndexResponse" -> "TodoIndexResponse"
-
-	// If the string is already properly capitalized (all words start with uppercase), return as is
-	if g.isProperlyCapitalized(s) {
-		return s
-	}
-
-	var result strings.Builder
-
-	// Handle underscore-separated words
-	if strings.Contains(s, "_") {
-		words := strings.Split(s, "_")
-		for i, word := range words {
-			if i > 0 {
-				result.WriteString("_")
-			}
-			if word != "" {
-				result.WriteString(g.capitalize(word))
-			}
-		}
-		return result.String()
-	}
-
-	// Handle camelCase/PascalCase by finding transitions from lower to upper case
-	result.WriteRune(unicode.ToUpper(rune(s[0])))
-	for i := 1; i < len(s); i++ {
-		r := rune(s[i])
-		if unicode.IsLower(rune(s[i-1])) && unicode.IsUpper(r) {
-			// We're at a word boundary (lower to upper case transition)
-			// Keep the uppercase as it indicates a new word
-			result.WriteRune(r)
-		} else {
-			// Just add the character as is
-			result.WriteRune(r)
-		}
-	}
-
-	return result.String()
-}
-
-// isProperlyCapitalized checks if a string is already properly capitalized (each word starts with uppercase)
-func (g *TypeNameGenerator) isProperlyCapitalized(s string) bool {
-	if len(s) == 0 {
-		return true
-	}
-
-	// First character should be uppercase
-	if !unicode.IsUpper(rune(s[0])) {
-		return false
-	}
-
-	// Check each character to see if it follows proper capitalization rules
-	for i := 1; i < len(s); i++ {
-		// If current char is uppercase and previous char is lowercase, that's a word boundary
-		// If current char is uppercase and previous char is also uppercase, we're in an acronym
-		// If current char is lowercase, that's fine within a word
-		// So basically, if we find a lowercase followed by lowercase, that's fine
-		// If we find uppercase followed by lowercase, that's fine
-		// The only invalid case would be lowercase starting a word, which we already checked
-	}
-
-	return true
+	// For other cases, just return as is
+	return name
 }
 
 // resolveConflict handles naming conflicts by adding numeric suffixes
@@ -300,7 +222,13 @@ func (g *TypeNameGenerator) isNameUsed(name string, existingTypes []string) bool
 	}
 
 	// Check existing types
-	return slices.Contains(existingTypes, name)
+	for _, existing := range existingTypes {
+		if existing == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GenerateAllTypeNames generates type names for all anonymous structs in a file

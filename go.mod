@@ -1,4 +1,4 @@
-module github.com/andreas/gin-replace-anon-struct
+module gin-replace-anon-struct
 
 go 1.21
 

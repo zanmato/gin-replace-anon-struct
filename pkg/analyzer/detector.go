@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/andreas/gin-replace-anon-struct/pkg/router"
+	"gin-replace-anon-struct/pkg/router"
 )
 
 // AnonymousStructDetector identifies anonymous structs in Gin handlers
@@ -97,6 +97,9 @@ func (d *AnonymousStructDetector) identifyHandlers() {
 					DocComment:       d.extractDocComment(node),
 				}
 				d.handlers[handlerName] = handler
+
+				// Also look for the inner function literal in factories
+				d.findInnerHandlerInFactory(node, handler)
 			}
 		}
 		return true
@@ -180,15 +183,7 @@ func (d *AnonymousStructDetector) isFuncLitGinHandler(funcLit *ast.FuncLit) bool
 func (d *AnonymousStructDetector) findAnonymousStructs() {
 	for _, handler := range d.handlers {
 		if handler.FuncDecl != nil && handler.FuncDecl.Body != nil {
-			// For factory functions, we don't want to process the factory body itself,
-			// only the inner function literal that will be found by findInnerHandlerInFactory
-			if !handler.IsFactory {
-				d.findAnonymousStructsInBody(handler.FuncDecl.Body, handler)
-			}
-		}
-		// Process factory inner functions
-		if handler.IsFactory && handler.FuncDecl != nil {
-			d.findInnerHandlerInFactory(handler.FuncDecl, handler)
+			d.findAnonymousStructsInBody(handler.FuncDecl.Body, handler)
 		}
 		// Also find response structs
 		d.findResponseStructs(handler)
@@ -199,9 +194,6 @@ func (d *AnonymousStructDetector) findAnonymousStructs() {
 func (d *AnonymousStructDetector) findAnonymousStructsInBody(body *ast.BlockStmt, handler *HandlerInfo) {
 	// Track variable declarations for anonymous structs
 	varDecls := make(map[string]*ast.ValueSpec)
-
-	// Track positions we've already detected to avoid duplicates
-	detectedPositions := make(map[token.Pos]bool)
 
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch node := n.(type) {
@@ -221,54 +213,28 @@ func (d *AnonymousStructDetector) findAnonymousStructsInBody(body *ast.BlockStmt
 					}
 
 					if structType != nil {
-						// Check if we've already detected this position to avoid duplicates
-						if !detectedPositions[node.Pos()] {
-							varDecls[name.Name] = node
-							// Check if this is an array type
-							isArray := false
-							if _, ok := node.Type.(*ast.ArrayType); ok {
-								isArray = true
-							}
-							// Found anonymous struct in var declaration
-							anonymousStruct := AnonymousStructInfo{
-								VariableName:      name.Name,
-								HandlerName:       handler.Name,
-								BindingType:       BindingTypeJSON, // Default, will be updated
-								StructType:        structType,
-								Position:          node.Pos(),
-								ValueSpec:         node,
-								IsArray:           isArray,
-								GeneratedTypeName: "",
-							}
-							handler.AnonymousStructs = append(handler.AnonymousStructs, anonymousStruct)
-							detectedPositions[node.Pos()] = true
+						varDecls[name.Name] = node
+						// Found anonymous struct in var declaration
+						anonymousStruct := AnonymousStructInfo{
+							VariableName:      name.Name,
+							HandlerName:       handler.Name,
+							BindingType:       BindingTypeJSON, // Default, will be updated
+							StructType:        structType,
+							Position:          node.Pos(),
+							ValueSpec:         node,
+							GeneratedTypeName: "",
 						}
+						handler.AnonymousStructs = append(handler.AnonymousStructs, anonymousStruct)
 					}
 				}
 			}
 
 		case *ast.AssignStmt:
-			// Handle assignment: q := struct{...}{} or items := []struct{...}{}
+			// Handle assignment: q := struct{...}{}
 			for i, lhs := range node.Lhs {
 				if ident, ok := lhs.(*ast.Ident); ok && i < len(node.Rhs) {
 					if compLit, ok := node.Rhs[i].(*ast.CompositeLit); ok {
-						var structType *ast.StructType
-						// Check for direct struct type: q := struct{...}{}
-						if st, ok := compLit.Type.(*ast.StructType); ok {
-							structType = st
-						} else if arrayType, ok := compLit.Type.(*ast.ArrayType); ok {
-							// Check for slice of structs: items := []struct{...}{}
-							if st, ok := arrayType.Elt.(*ast.StructType); ok {
-								structType = st
-							}
-						}
-
-						if structType != nil {
-							// Check if this is an array type
-							isArray := false
-							if _, ok := compLit.Type.(*ast.ArrayType); ok {
-								isArray = true
-							}
+						if structType, ok := compLit.Type.(*ast.StructType); ok {
 							// Found anonymous struct in assignment
 							anonymousStruct := AnonymousStructInfo{
 								VariableName:      ident.Name,
@@ -277,7 +243,6 @@ func (d *AnonymousStructDetector) findAnonymousStructsInBody(body *ast.BlockStmt
 								StructType:        structType,
 								Position:          node.Pos(),
 								AssignmentStmt:    node,
-								IsArray:           isArray,
 								GeneratedTypeName: "",
 							}
 							handler.AnonymousStructs = append(handler.AnonymousStructs, anonymousStruct)
@@ -307,98 +272,22 @@ func (d *AnonymousStructDetector) identifyBindingCalls(call *ast.CallExpr, handl
 		}
 
 		if bindingType, exists := bindingMethods[sel.Sel.Name]; exists {
-			// Check if this call takes a reference to a variable
+			// Check if this call takes a reference to an anonymous struct variable
 			for _, arg := range call.Args {
 				if unary, ok := arg.(*ast.UnaryExpr); ok && unary.Op == token.AND {
 					if ident, ok := unary.X.(*ast.Ident); ok {
-						// First, try to update anonymous structs
-						foundAnonStruct := false
+						// Update the anonymous struct with binding type and call info
 						for i, anonStruct := range handler.AnonymousStructs {
 							if anonStruct.VariableName == ident.Name {
 								handler.AnonymousStructs[i].BindingType = bindingType
 								handler.AnonymousStructs[i].BindingCall = call
-								foundAnonStruct = true
 								break
 							}
 						}
-
-						// If not found in anonymous structs, check if it's a named type
-						if !foundAnonStruct {
-							// Try to determine the type name from the variable declaration
-							typeName := d.getVariableTypeName(ident, handler)
-							if typeName != "" {
-								namedBinding := NamedTypeBindingInfo{
-									VariableName: ident.Name,
-									TypeName:     typeName,
-									BindingType:  bindingType,
-									BindingCall:  call,
-									Position:     call.Pos(),
-								}
-								handler.NamedTypeBindings = append(handler.NamedTypeBindings, namedBinding)
-							}
-						}
 					}
 				}
 			}
 		}
-	}
-}
-
-// getVariableTypeName tries to determine the type name of a variable from its declaration
-func (d *AnonymousStructDetector) getVariableTypeName(ident *ast.Ident, handler *HandlerInfo) string {
-	if handler.FuncDecl == nil || handler.FuncDecl.Body == nil {
-		return ""
-	}
-
-	// Search for the variable declaration in the function body
-	var typeName string
-	ast.Inspect(handler.FuncDecl.Body, func(n ast.Node) bool {
-		switch node := n.(type) {
-		case *ast.ValueSpec:
-			// Check variable declarations: var a AccountAddress
-			for _, name := range node.Names {
-				if name.Name == ident.Name && node.Type != nil {
-					typeName = d.getTypeName(node.Type)
-					return false // Found it, stop searching
-				}
-			}
-		case *ast.AssignStmt:
-			// Check short variable declarations: a := AccountAddress{} or a := SomeFunction()
-			for i, lhs := range node.Lhs {
-				if lhsIdent, ok := lhs.(*ast.Ident); ok && lhsIdent.Name == ident.Name && i < len(node.Rhs) {
-					// Check if the RHS is a function call or composite literal
-					if compLit, ok := node.Rhs[i].(*ast.CompositeLit); ok {
-						typeName = d.getTypeName(compLit.Type)
-					} else if _, ok := node.Rhs[i].(*ast.CallExpr); ok {
-						// For function calls, we'd need more sophisticated analysis
-						// For now, just return empty
-						typeName = ""
-					}
-					return false // Found it, stop searching
-				}
-			}
-		}
-		return true
-	})
-
-	return typeName
-}
-
-// getTypeName extracts the type name from an AST expression
-func (d *AnonymousStructDetector) getTypeName(expr ast.Expr) string {
-	switch t := expr.(type) {
-	case *ast.Ident:
-		return t.Name
-	case *ast.SelectorExpr:
-		return d.getTypeName(t.X) + "." + t.Sel.Name
-	case *ast.StarExpr:
-		return "*" + d.getTypeName(t.X)
-	case *ast.ArrayType:
-		return "[]" + d.getTypeName(t.Elt)
-	case *ast.MapType:
-		return "map[" + d.getTypeName(t.Key) + "]" + d.getTypeName(t.Value)
-	default:
-		return ""
 	}
 }
 
@@ -477,38 +366,19 @@ func (d *AnonymousStructDetector) extractResponseStructFromJSON(jsonCall *ast.Ca
 
 		// Handle array/slice literals: c.JSON(200, []Product{})
 		if arrayType, ok := arg.Type.(*ast.ArrayType); ok {
-			if elementType, ok := arrayType.Elt.(*ast.Ident); ok {
-				// This is a named array type, track it for @Success annotation
-				namedResponse := NamedTypeResponseInfo{
-					VariableName:   "response", // Default name for literal responses
-					TypeName:       "[]" + elementType.Name,
-					IsArray:        true,
-					HTTPStatusCode: d.extractHTTPStatusCode(jsonCall),
-					ResponseCall:   jsonCall,
-					Position:       arg.Pos(),
-				}
-				handler.NamedTypeResponses = append(handler.NamedTypeResponses, namedResponse)
+			if _, ok := arrayType.Elt.(*ast.Ident); ok {
+				// This is a named type, ignore - not anonymous
 			}
 		}
 
 		// Handle named struct literals: c.JSON(200, Product{})
-		if ident, ok := arg.Type.(*ast.Ident); ok {
-			// This is a named type, track it for @Success annotation
-			namedResponse := NamedTypeResponseInfo{
-				VariableName:   "response", // Default name for literal responses
-				TypeName:       ident.Name,
-				IsArray:        false,
-				HTTPStatusCode: d.extractHTTPStatusCode(jsonCall),
-				ResponseCall:   jsonCall,
-				Position:       arg.Pos(),
-			}
-			handler.NamedTypeResponses = append(handler.NamedTypeResponses, namedResponse)
+		if _, ok := arg.Type.(*ast.Ident); ok {
+			// This is a named type, ignore - not anonymous
 		}
 
 	case *ast.Ident:
-		// Handle variables: c.JSON(200, p) where p might be an anonymous struct or named type
-		// First, look through our already found anonymous structs to see if this matches
-		foundAnonStruct := false
+		// Handle variables: c.JSON(200, p) where p might be an anonymous struct
+		// Look through our already found anonymous structs to see if this matches
 		for _, anonStruct := range handler.AnonymousStructs {
 			if anonStruct.VariableName == arg.Name && !anonStruct.IsResponse {
 				// This is a variable containing an anonymous struct used in response
@@ -523,39 +393,14 @@ func (d *AnonymousStructDetector) extractResponseStructFromJSON(jsonCall *ast.Ca
 					ResponseCall:   jsonCall,
 					IsResponse:     true,
 					HTTPStatusCode: d.extractHTTPStatusCode(jsonCall),
-					IsArray:        anonStruct.IsArray,
 				}
 				// Replace the original with the response version
 				for i, existing := range handler.AnonymousStructs {
 					if existing.VariableName == arg.Name && !existing.IsResponse {
 						handler.AnonymousStructs[i] = responseStruct
-						foundAnonStruct = true
 						break
 					}
 				}
-				break
-			}
-		}
-
-		// If not found as anonymous struct, check if it's a named type variable
-		if !foundAnonStruct {
-			typeName := d.getVariableTypeName(arg, handler)
-			if typeName != "" {
-				// Determine if it's an array type
-				isArray := false
-				if strings.HasPrefix(typeName, "[]") {
-					isArray = true
-				}
-
-				namedResponse := NamedTypeResponseInfo{
-					VariableName:   arg.Name,
-					TypeName:       typeName,
-					IsArray:        isArray,
-					HTTPStatusCode: d.extractHTTPStatusCode(jsonCall),
-					ResponseCall:   jsonCall,
-					Position:       arg.Pos(),
-				}
-				handler.NamedTypeResponses = append(handler.NamedTypeResponses, namedResponse)
 			}
 		}
 	}
@@ -651,58 +496,33 @@ func (d *AnonymousStructDetector) toCamelCase(s string) string {
 // createFieldName creates a proper Go field name from a JSON key
 func (d *AnonymousStructDetector) createFieldName(jsonKey string) string {
 	if jsonKey == "" {
-		return "Field"
+		return "field"
 	}
 
-	// Remove any remaining quotes that might not have been stripped
-	jsonKey = strings.Trim(jsonKey, "\"")
-
-	// For single character keys, capitalize them
+	// Convert to lowercase first letter (unexported)
 	if len(jsonKey) == 1 {
-		return strings.ToUpper(jsonKey)
+		return strings.ToLower(jsonKey)
 	}
 
-	// For special cases like "id" -> "ID" (all uppercase 2-3 letter acronyms)
-	specialCases := map[string]string{
-		"id":    "ID",
-		"uuid":  "UUID",
-		"url":   "URL",
-		"api":   "API",
-		"http":  "HTTP",
-		"https": "HTTPS",
-		"json":  "JSON",
-		"xml":   "XML",
-		"sql":   "SQL",
-		"db":    "DB",
-	}
-	if upperCase, exists := specialCases[strings.ToLower(jsonKey)]; exists {
-		return upperCase
+	// For keys like "ID", convert to "id"
+	if strings.ToUpper(jsonKey) == jsonKey {
+		return strings.ToLower(jsonKey)
 	}
 
-	// For keys like "ID" (already uppercase), keep as is
-	if strings.ToUpper(jsonKey) == jsonKey && len(jsonKey) <= 4 {
-		return jsonKey
-	}
-
-	// For camelCase like "userName", convert to "UserName" (capitalize first letter)
+	// For camelCase like "userName", convert to "userName" (already good)
 	if unicode.IsLower(rune(jsonKey[0])) {
-		return strings.ToUpper(jsonKey[:1]) + jsonKey[1:]
-	}
-
-	// For PascalCase like "UserName", keep as is
-	if unicode.IsUpper(rune(jsonKey[0])) {
 		return jsonKey
 	}
 
-	// For snake_case like "user_name", use toCamelCase and capitalize first letter
+	// For PascalCase like "UserName", convert to "userName"
+	if len(jsonKey) > 1 && unicode.IsUpper(rune(jsonKey[0])) {
+		return strings.ToLower(jsonKey[:1]) + jsonKey[1:]
+	}
+
+	// For snake_case like "user_name", use toCamelCase and lowercase first letter
 	camelCase := d.toCamelCase(jsonKey)
 	if len(camelCase) > 0 {
-		return strings.ToUpper(camelCase[:1]) + camelCase[1:]
-	}
-
-	// Default: capitalize first letter
-	if len(jsonKey) > 0 {
-		return strings.ToUpper(jsonKey[:1]) + jsonKey[1:]
+		return strings.ToLower(camelCase[:1]) + camelCase[1:]
 	}
 
 	return jsonKey
@@ -715,17 +535,10 @@ func (d *AnonymousStructDetector) extractDocComment(funcDecl *ast.FuncDecl) stri
 	}
 
 	var comments []string
-	seenComments := make(map[string]bool) // Track seen comments to deduplicate
-
 	for _, comment := range funcDecl.Doc.List {
 		// Remove the "// " prefix from each comment line
 		text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
-
-		// Only add if we haven't seen this comment before
-		if !seenComments[text] {
-			comments = append(comments, text)
-			seenComments[text] = true
-		}
+		comments = append(comments, text)
 	}
 
 	return strings.Join(comments, "\n")
@@ -771,6 +584,22 @@ func (d *AnonymousStructDetector) extractHTTPStatusCode(jsonCall *ast.CallExpr) 
 			return 404
 		case "StatusInternalServerError":
 			return 500
+		}
+
+		// Check for http.StatusXXX format
+		if strings.HasPrefix(ident.Name, "Status") {
+			// Default common ones to reasonable values
+			if strings.Contains(ident.Name, "OK") {
+				return 200
+			} else if strings.Contains(ident.Name, "Created") {
+				return 201
+			} else if strings.Contains(ident.Name, "BadRequest") {
+				return 400
+			} else if strings.Contains(ident.Name, "NotFound") {
+				return 404
+			} else if strings.Contains(ident.Name, "Error") {
+				return 500
+			}
 		}
 	}
 

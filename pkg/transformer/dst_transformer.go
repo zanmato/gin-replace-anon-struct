@@ -7,9 +7,10 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/andreas/gin-replace-anon-struct/pkg/analyzer"
-	"github.com/andreas/gin-replace-anon-struct/pkg/namer"
-	"github.com/andreas/gin-replace-anon-struct/pkg/swagger"
+	"gin-replace-anon-struct/pkg/analyzer"
+	"gin-replace-anon-struct/pkg/namer"
+	"gin-replace-anon-struct/pkg/swagger"
+
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 	"github.com/dave/dst/dstutil"

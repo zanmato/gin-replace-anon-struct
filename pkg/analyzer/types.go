@@ -4,17 +4,17 @@ import (
 	"go/ast"
 	"go/token"
 
-	"github.com/andreas/gin-replace-anon-struct/pkg/router"
+	"gin-replace-anon-struct/pkg/router"
 )
 
 // BindingType represents the type of binding being used
 type BindingType string
 
 const (
-	BindingTypeJSON    BindingType = "json"    // ShouldBindJSON, BindJSON
-	BindingTypeQuery   BindingType = "query"   // ShouldBindQuery, BindQuery
-	BindingTypeForm    BindingType = "form"    // ShouldBind, Bind (with form tags)
-	BindingTypeBind    BindingType = "bind"    // ShouldBind, Bind (generic)
+	BindingTypeJSON     BindingType = "json"     // ShouldBindJSON, BindJSON
+	BindingTypeQuery    BindingType = "query"    // ShouldBindQuery, BindQuery
+	BindingTypeForm     BindingType = "form"     // ShouldBind, Bind (with form tags)
+	BindingTypeBind     BindingType = "bind"     // ShouldBind, Bind (generic)
 	BindingTypeResponse BindingType = "response" // c.JSON response structs
 )
 
@@ -50,53 +50,11 @@ type AnonymousStructInfo struct {
 	// Whether this struct is used in a response (c.JSON call)
 	IsResponse bool
 
-	// Whether this struct is an array/slice (e.g., []struct{})
-	IsArray bool
-
 	// HTTP status code used in the response (for response structs)
 	HTTPStatusCode int
 
 	// Generated type name (e.g., "ProductsRequest", "ProductsQueryParams")
 	GeneratedTypeName string
-}
-
-// NamedTypeBindingInfo represents information about named type bindings in handlers
-type NamedTypeBindingInfo struct {
-	// Variable name (e.g., "a", "req", "body")
-	VariableName string
-
-	// Type name (e.g., "AccountAddress", "Product")
-	TypeName string
-
-	// Type of binding (json, query, etc.)
-	BindingType BindingType
-
-	// The binding call that uses this variable (c.ShouldBindJSON(&a))
-	BindingCall *ast.CallExpr
-
-	// Position in the source file
-	Position token.Pos
-}
-
-// NamedTypeResponseInfo represents information about named type responses in handlers
-type NamedTypeResponseInfo struct {
-	// Variable name (e.g., "products", "p", "response")
-	VariableName string
-
-	// Type name (e.g., "Product", "Account", "Category")
-	TypeName string
-
-	// Whether this is an array/slice (e.g., []Product)
-	IsArray bool
-
-	// HTTP status code used in the response
-	HTTPStatusCode int
-
-	// The c.JSON call containing this type
-	ResponseCall *ast.CallExpr
-
-	// Position in the source file
-	Position token.Pos
 }
 
 // HandlerInfo represents information about a Gin handler function
@@ -112,12 +70,6 @@ type HandlerInfo struct {
 
 	// Anonymous structs found in this handler
 	AnonymousStructs []AnonymousStructInfo
-
-	// Named type bindings found in this handler (for @Param annotations)
-	NamedTypeBindings []NamedTypeBindingInfo
-
-	// Named type responses found in this handler (for @Success annotations)
-	NamedTypeResponses []NamedTypeResponseInfo
 
 	// Package name
 	PackageName string
@@ -192,6 +144,9 @@ type TypeInfo struct {
 
 	// Comment documentation
 	DocComment string
+
+	// Position where the type should be inserted
+	InsertPosition token.Pos
 
 	// Whether this is a request body, query params, etc.
 	BindingType BindingType

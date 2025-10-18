@@ -10,17 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gin-replace-anon-struct/pkg/analyzer"
+	"gin-replace-anon-struct/pkg/router"
+	"gin-replace-anon-struct/pkg/transformer"
+
 	"github.com/alecthomas/kong"
-	"github.com/andreas/gin-replace-anon-struct/pkg/analyzer"
-	"github.com/andreas/gin-replace-anon-struct/pkg/router"
-	"github.com/andreas/gin-replace-anon-struct/pkg/transformer"
 )
 
 var CLI struct {
-	WorkspaceRoot   string `kong:"arg,help='Workspace root directory to scan for handlers',type='existingdir'"`
-	RouterFile      string `kong:"help='Router file to parse for routes and handler names',type='existingfile'"`
-	DryRun          bool   `kong:"help='Show what would be changed without modifying files'"`
-	Verbose         bool   `kong:"help='Enable verbose output'"`
+	WorkspaceRoot    string `kong:"arg,help='Workspace root directory to scan for handlers',type='existingdir'"`
+	RouterFile       string `kong:"help='Router file to parse for routes and handler names',type='existingfile'"`
+	DryRun           bool   `kong:"help='Show what would be changed without modifying files'"`
+	Verbose          bool   `kong:"help='Enable verbose output'"`
 	StripRoutePrefix string `kong:"help='Strip this prefix from route paths when generating @Tags (e.g., /api)'"`
 }
 
@@ -271,4 +272,3 @@ func printAnalysisResults(result analyzer.FileAnalysisResult) {
 		fmt.Println()
 	}
 }
-

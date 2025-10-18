@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreas/gin-replace-anon-struct/pkg/analyzer"
-	"github.com/andreas/gin-replace-anon-struct/pkg/router"
-	"github.com/andreas/gin-replace-anon-struct/pkg/swagger"
-	"github.com/andreas/gin-replace-anon-struct/pkg/transformer"
+	"gin-replace-anon-struct/pkg/analyzer"
+	"gin-replace-anon-struct/pkg/router"
+	"gin-replace-anon-struct/pkg/swagger"
+	"gin-replace-anon-struct/pkg/transformer"
 )
 
 // TestCommentExtractionIntegration tests that only doc comments preceding handlers are extracted,
@@ -3449,7 +3449,7 @@ func ProductShow(c *gin.Context) {
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/andreas/gin-replace-anon-struct/handlers"
+	"gin-replace-anon-struct/handlers"
 )
 
 func Router() *gin.Engine {
@@ -4238,7 +4238,7 @@ func NoStatusHandler(c *gin.Context) {
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/andreas/gin-replace-anon-struct/handlers"
+	"gin-replace-anon-struct/handlers"
 )
 
 func setupRouter() *gin.Engine {
@@ -4369,8 +4369,8 @@ func Currencies(c *gin.Context) {
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/andreas/gin-replace-anon-struct/handlers"
-	"github.com/andreas/gin-replace-anon-struct/common"
+	"gin-replace-anon-struct/handlers"
+	"gin-replace-anon-struct/common"
 )
 
 func setupRouter() *gin.Engine {
